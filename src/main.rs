@@ -1,3 +1,4 @@
+use rand::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Display, Formatter},
@@ -113,12 +114,23 @@ impl Weighted for i32 {
 // shorted path
 impl<T, E: Weighted, ID: Clone + Hash + Eq> Graph<T, E, ID> {
     pub fn shortest_path(&self, from: ID, to: ID) -> Option<Rc<Route<ID>>> {
+        self.shortest_path_r(Route::start_rc(from), to)
+    }
+
+    pub fn shortest_path_r(&self, from: Rc<Route<ID>>, to: ID) -> Option<Rc<Route<ID>>> {
+        let mut toset = HashSet::new();
+        toset.insert(to);
+
+        self.closest(from, &toset)
+    }
+
+    pub fn closest(&self, from: Rc<Route<ID>>, to: &HashSet<ID>) -> Option<Rc<Route<ID>>> {
         let mut visited = HashSet::new();
         let mut routes = Vec::new();
-        routes.push(Route::start_rc(from));
+        routes.push(from);
         loop {
             let c_route = routes.pop()?;
-            if to == c_route.pos {
+            if to.contains(&c_route.pos) {
                 return Some(c_route);
             }
             if visited.contains(&c_route.pos) {
@@ -165,8 +177,72 @@ impl<T, E: Weighted, ID: Clone + Hash + Eq> Graph<T, E, ID> {
             }
         }
     }
+
+    pub fn greedy_salesman(&self, start: ID) -> Option<Rc<Route<ID>>> {
+        let mut to_visit: HashSet<ID> = self.data.keys().cloned().collect();
+        to_visit.remove(&start);
+
+        let mut route = Route::start_rc(start.clone());
+
+        while !to_visit.is_empty() {
+            route = self.closest(route, &to_visit)?;
+            to_visit.remove(&route.pos);
+        }
+
+        self.shortest_path_r(route, start)
+    }
+
+    pub fn complete_path(&self, path: &[ID]) -> Option<Rc<Route<ID>>> {
+        if path.len() < 2 {
+            return None;
+        }
+
+        let mut route = Route::start_rc(path[0].clone());
+
+        for pos in &path[1..path.len() - 1] {
+            if !route.contains(pos) {
+                route = self.shortest_path_r(route, pos.clone())?;
+            }
+        }
+        self.shortest_path_r(route, path[path.len() - 1].clone())
+    }
 }
 
+impl<T, E: Weighted, ID: Clone + Hash + Eq + Debug> Graph<T, E, ID> {
+    pub fn iter_salesman(&self, start: ID) -> Option<Rc<Route<ID>>> {
+        let mut bpath: Vec<ID> = self.data.keys().cloned().collect();
+        bpath.shuffle(&mut rand::thread_rng());
+        // move start to front
+        for n in 0..bpath.len() {
+            if bpath[n] == start {
+                bpath.swap(0, n);
+                break;
+            }
+        }
+        bpath.push(start);
+        let mut brute = self.complete_path(&bpath)?;
+        let mut no_imp = 0;
+        loop {
+            let mut p2 = bpath.clone();
+            let sa = (rand::random::<usize>() % (p2.len() - 2)) + 1; // not the end
+
+            let sb = (rand::random::<usize>() % (p2.len() - 2)) + 1; // not the end
+
+            p2.swap(sa, sb);
+            let r2 = self.complete_path(&p2)?;
+            if r2.len < brute.len {
+                println!("Improve On {} = \n {}", brute, r2);
+                bpath = p2;
+                brute = r2;
+                no_imp = 0;
+            }
+            no_imp += 1;
+            if no_imp >= 50 {
+                return Some(brute);
+            }
+        }
+    }
+}
 fn main() -> Result<(), GraphErr> {
     let mut g = Graph::new();
     for x in vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] {
@@ -193,9 +269,19 @@ fn main() -> Result<(), GraphErr> {
         None => println!("No Path From H to B"),
     }
 
-    match g.shortest_path('F', 'A') {
-        Some(route) => println!("shortest path F-A = {}", route),
-        None => println!("No Path From F to A"),
+    match g.shortest_path('D', 'E') {
+        Some(route) => println!("shortest path D-E = {}", route),
+        None => println!("No Path From D to E"),
+    }
+
+    match g.greedy_salesman('A') {
+        Some(route) => println!("greedy salesman 'A' {}", route),
+        None => println!("No Path for Salesman A"),
+    }
+
+    match g.iter_salesman('A') {
+        Some(route) => println!("iter_greedy salesman 'A' {}", route),
+        None => println!("No Path for Salesman A"),
     }
 
     Ok(())
